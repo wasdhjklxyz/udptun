@@ -1,17 +1,19 @@
 #include <linux/init.h>
 #include <linux/module.h>
 
+#include "udptun.h"
+
 MODULE_LICENSE("GPL-2.0");
 
 static int udptun_init(void)
 {
-	printk(KERN_ALERT "hello world\n");
+	UDPTUN_DBG("hello world");
 	return 0;
 }
 
 static void udptun_exit(void)
 {
-	printk(KERN_ALERT "goodbye\n");
+	UDPTUN_DBG("goodbye");
 }
 
 module_init(udptun_init);
