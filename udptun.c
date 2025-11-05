@@ -4,6 +4,7 @@
 #include <linux/etherdevice.h>
 #include <linux/gfp_types.h>
 #include <linux/skbuff.h>
+#include <linux/skbuff.h>
 
 MODULE_LICENSE("GPL-2.0");
 
@@ -70,10 +71,26 @@ static netdev_tx_t udptun_start_xmit(struct sk_buff *skb, struct net_device *dev
 	return NETDEV_TX_OK;
 }
 
+static void udptun_get_stats64(struct net_device *dev,
+			     struct rtnl_link_stats64 *stats)
+{
+	struct udptun_priv *priv = netdev_priv(dev);
+
+	stats->rx_packets = priv->stats.rx_packets;
+	stats->tx_packets = priv->stats.tx_packets;
+	stats->rx_bytes = priv->stats.rx_bytes;
+	stats->tx_bytes = priv->stats.tx_bytes;
+	stats->rx_errors = priv->stats.rx_errors;
+	stats->tx_errors = priv->stats.tx_errors;
+	stats->rx_dropped = priv->stats.rx_dropped;
+	stats->tx_dropped = priv->stats.tx_dropped;
+}
+
 static const struct net_device_ops udptun_netdev_ops = {
 	.ndo_open = udptun_open,
 	.ndo_stop = udptun_stop,
 	.ndo_start_xmit = udptun_start_xmit,
+	.ndo_get_stats64 = udptun_get_stats64,
 };
 
 static void udptun_probe(struct net_device *dev)
