@@ -5,7 +5,7 @@ MODULE_LICENSE("GPL-2.0");
 
 static int udptun_init(void)
 {
-	printk(KERN_ALERT "udptun world\n");
+	printk(KERN_ALERT "hello world\n");
 	return 0;
 }
 
