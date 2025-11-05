@@ -1,6 +1,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
+#include <linux/etherdevice.h>
 
 MODULE_LICENSE("GPL-2.0");
 
@@ -12,11 +13,27 @@ MODULE_LICENSE("GPL-2.0");
 
 static struct net_device *udptun_dev;
 
-static const struct net_device_ops udptun_netdev_ops = {};
-
 struct udptun_priv {
 	struct net_device_stats stats;
 	spinlock_t lock;
+};
+
+static int udptun_open(struct net_device *dev)
+{
+	eth_hw_addr_set(dev, "\0UDPTUN"); /* Set fake MAC address */
+	netif_start_queue(dev);
+	return 0;
+}
+
+static int udptun_stop(struct net_device *dev)
+{
+	netif_stop_queue(dev);
+	return 0;
+}
+
+static const struct net_device_ops udptun_netdev_ops = {
+	.ndo_open = udptun_open,
+	.ndo_stop = udptun_stop,
 };
 
 static void udptun_probe(struct net_device *dev)
