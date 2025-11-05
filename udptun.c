@@ -12,11 +12,48 @@ MODULE_LICENSE("GPL-2.0");
 
 static struct net_device *udptun_dev;
 
+static const struct net_device_ops udptun_netdev_ops = {};
+
+struct udptun_priv {
+	struct net_device_stats stats;
+	spinlock_t lock;
+};
+
+static void udptun_probe(struct net_device *dev)
+{
+	struct udptun_priv *priv;
+
+	ether_setup(dev);
+
+	dev->netdev_ops = &udptun_netdev_ops;
+
+	/*
+	 * IFF_NOARP: We're not using ARP
+	 * IFF_POINTOPOINT: This is a tunnel, not broadcast medium
+	 */
+	dev->flags |= IFF_NOARP | IFF_POINTOPOINT;
+	dev->flags &= ~IFF_BROADCAST; /* Not a broadcast device */
+
+	/* We handle our own checksums */
+	dev->features |= NETIF_F_HW_CSUM | NETIF_F_HIGHDMA;
+
+	/* Disable header caching - we're not a real Ethernet */
+	dev->header_ops = NULL;
+
+	/* WireGuard uses 1420 to fit in Ethernet */
+	dev->mtu = 1420;
+
+	priv = netdev_priv(dev);
+	memset(priv, 0, sizeof(struct udptun_priv));
+	spin_lock_init(&priv->lock);
+}
+
 static int __init udptun_init(void)
 {
 	int ret;
 
-	udptun_dev = alloc_netdev(0, "udptun%d", NET_NAME_UNKNOWN, NULL);
+	udptun_dev = alloc_netdev(sizeof(struct udptun_priv), "udptun%d",
+				NET_NAME_UNKNOWN, udptun_probe);
 	if (!udptun_dev) {
 		UDPTUN_DBG("alloc_netdev failed");
 		return -ENOMEM; /* FIXME: This is just assumption */
