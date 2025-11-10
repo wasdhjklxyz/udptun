@@ -23,7 +23,7 @@ struct udptun_priv {
 
 static int udptun_open(struct net_device *dev)
 {
-	eth_hw_addr_set(dev, "\0UDPTUN"); /* Set fake MAC address */
+	eth_hw_addr_set(dev, "\0UDPTUN\0"); /* Set fake MAC address */
 	netif_start_queue(dev);
 	return 0;
 }
