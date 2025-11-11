@@ -33,6 +33,8 @@ static int udptun_poll(struct napi_struct *napi, int budget)
 			break;
 		}
 
+		UDPTUN_DBG("RX sk_buff len=%d", skb->len);
+
 		skb->protocol = eth_type_trans(skb, napi->dev);
 		skb->ip_summed = CHECKSUM_UNNECESSARY;
 
@@ -46,6 +48,8 @@ static int udptun_poll(struct napi_struct *napi, int budget)
 	if (work_done < budget) {
 		napi_complete_done(napi, work_done);
 	}
+
+	UDPTUN_DBG("Poll done, work_done=%d", work_done);
 
 	return work_done;
 }
@@ -79,7 +83,7 @@ static netdev_tx_t udptun_start_xmit(struct sk_buff *skb, struct net_device *dev
 	struct sk_buff *rx_skb;
 	struct udptun_priv *priv = netdev_priv(dev);
 
-	UDPTUN_DBG("TX packet len=%u", skb->len);
+	UDPTUN_DBG("TX sk_buff len=%u", skb->len);
 
 	priv->stats.tx_packets++;
 	priv->stats.tx_bytes += skb->len;
