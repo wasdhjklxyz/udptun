@@ -4,6 +4,10 @@
 #include <linux/etherdevice.h>
 #include <linux/gfp_types.h>
 #include <linux/skbuff.h>
+#include <linux/if_arp.h>
+#include <linux/netdevice.h>
+#include <net/ip_tunnels.h>
+#include <net/rtnetlink.h>
 
 MODULE_LICENSE("GPL-2.0");
 
@@ -12,8 +16,6 @@ MODULE_LICENSE("GPL-2.0");
 		printk(KERN_DEBUG "[%s:%d] %s(): " fmt "\n", __FILE__, \
 		       __LINE__, __func__, ##__VA_ARGS__);             \
 	} while (0)
-
-static struct net_device *udptun_dev;
 
 struct udptun_priv {
 	struct net_device_stats stats;
@@ -122,70 +124,71 @@ static const struct net_device_ops udptun_netdev_ops = {
 	.ndo_get_stats64 = udptun_get_stats64,
 };
 
-static void udptun_probe(struct net_device *dev)
-{
-	struct udptun_priv *priv;
+static const struct device_type udptun_device_type = { .name = KBUILD_MODNAME };
 
-	ether_setup(dev);
+static void udptun_setup(struct net_device *dev)
+{
+	struct udptun_priv *priv = netdev_priv(dev);
+	enum {
+		UDPTUN_NETDEV_FEATURES = NETIF_F_HW_CSUM | NETIF_F_RXCSUM |
+				       NETIF_F_HIGHDMA | NETIF_F_SG
+	};
 
 	dev->netdev_ops = &udptun_netdev_ops;
-
-	dev->flags |= IFF_NOARP; /* We're not using ARP */
-	dev->flags &= ~IFF_BROADCAST; /* Not a broadcast device */
-
-	/* We handle our own checksums */
-	dev->features |= NETIF_F_HW_CSUM | NETIF_F_HIGHDMA;
-
-	/* Don't bother locking device we'll handle that */
+	dev->header_ops = &ip_tunnel_header_ops;
+	dev->hard_header_len = 0;
+	dev->addr_len = 0;
+	dev->type = ARPHRD_NONE;
+	dev->flags = IFF_POINTOPOINT | IFF_NOARP;
+	dev->priv_flags = IFF_NO_QUEUE;
+	dev->features |= UDPTUN_NETDEV_FEATURES;
+	dev->hw_features |= UDPTUN_NETDEV_FEATURES;
+	dev->hw_enc_features |= UDPTUN_NETDEV_FEATURES;
 	dev->lltx = true;
-
-	/* Disable header caching - we're not a real Ethernet */
-	dev->header_ops = NULL;
-
-	/* WireGuard uses 1420 to fit in Ethernet */
 	dev->mtu = 1420;
 
-	priv = netdev_priv(dev);
+	SET_NETDEV_DEVTYPE(dev, &udptun_device_type);
+
 	memset(priv, 0, sizeof(struct udptun_priv));
+}
+
+static int udptun_newlink(struct net *src_net, struct net_device *dev,
+			struct nlattr *tb[], struct nlattr *data[],
+			struct netlink_ext_ack *extack)
+{
+	struct udptun_priv *priv = netdev_priv(dev);
+
 	spin_lock_init(&priv->lock);
 	skb_queue_head_init(&priv->rx_queue);
+	netif_napi_add(dev, &priv->napi, udptun_poll);
+
+	return register_netdevice(dev);
 }
+
+static void udptun_dellink(struct net_device *dev, struct list_head *head)
+{
+	struct udptun_priv *priv = netdev_priv(dev);
+
+	netif_napi_del(&priv->napi);
+	unregister_netdevice_queue(dev, head);
+}
+
+static struct rtnl_link_ops udptun_link_ops = {
+	.kind = KBUILD_MODNAME,
+	.priv_size = sizeof(struct udptun_priv),
+	.setup = udptun_setup,
+	.newlink = udptun_newlink,
+	.dellink = udptun_dellink,
+};
 
 static int __init udptun_init(void)
 {
-	int ret;
-	struct udptun_priv *priv;
-
-	udptun_dev = alloc_netdev(sizeof(struct udptun_priv), "udptun%d",
-				NET_NAME_UNKNOWN, udptun_probe);
-	if (!udptun_dev) {
-		UDPTUN_DBG("alloc_netdev failed");
-		return -ENOMEM; /* FIXME: This is just assumption */
-	}
-
-	priv = netdev_priv(udptun_dev);
-	netif_napi_add(udptun_dev, &priv->napi, udptun_poll);
-
-	ret = register_netdev(udptun_dev);
-	if (ret < 0) {
-		UDPTUN_DBG("register_netdev failed: %d", ret);
-		free_netdev(udptun_dev);
-		return -ret;
-	}
-
-	UDPTUN_DBG("registered as %s", udptun_dev->name);
-	return 0;
+	return rtnl_link_register(&udptun_link_ops);
 }
 
 static void __exit udptun_exit(void)
 {
-	struct udptun_priv *priv = netdev_priv(udptun_dev);
-
-	if (udptun_dev) {
-		netif_napi_del(&priv->napi);
-		unregister_netdev(udptun_dev);
-		free_netdev(udptun_dev);
-	}
+	rtnl_link_unregister(&udptun_link_ops);
 }
 
 module_init(udptun_init);
