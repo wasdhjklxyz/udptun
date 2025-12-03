@@ -119,6 +119,7 @@ static netdev_tx_t udptun_start_xmit(struct sk_buff *skb, struct net_device *dev
 	sock = priv->sock;
 	if (!sock) {
 		UDPTUN_DBG("Socket not initialized");
+		dev_kfree_skb(skb);
 		return -ENOENT;
 	}
 
