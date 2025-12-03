@@ -32,6 +32,8 @@ struct udptun_priv {
 	struct net __rcu *net;
 	struct socket __rcu *sock;
 	struct net_device *dev;
+	__be32 peer_addr;
+	__be16 peer_port;
 };
 
 static int udptun_rcv(struct sock *sk, struct sk_buff *skb)
@@ -284,7 +286,6 @@ static void udptun_setup(struct net_device *dev)
 
 	memset(priv, 0, sizeof(struct udptun_priv));
 	mutex_init(&priv->lock);
-	priv->dev = dev;
 }
 
 static int udptun_newlink(struct net *src_net, struct net_device *dev,
@@ -294,6 +295,9 @@ static int udptun_newlink(struct net *src_net, struct net_device *dev,
 	struct udptun_priv *priv = netdev_priv(dev);
 
 	rcu_assign_pointer(priv->net, src_net);
+	priv->dev = dev;
+	priv->peer_addr = 0;
+	priv->peer_port = htons(UDPTUN_PORT);
 
 	UDPTUN_DBG("Creating new device: %s", dev->name);
 
