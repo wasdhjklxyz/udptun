@@ -32,24 +32,37 @@ make KDIR=/path/to/linux-src
 
 #### Machine A (192.0.2.2)
 ```sh
+# Manual setup
 insmod udptun.ko
 ip link add udptun0 type udptun
 echo "192.0.2.3" > /sys/class/net/udptun0/peer
 ip addr add 10.0.0.2/24 dev udptun0
 ip link set udptun0 up
 
-ping 10.0.0.2  # After Machine B setup
+# Or use test script
+./scripts/test.sh 10.0.0.2 192.0.2.3
 ```
 
 #### Machine B (192.0.2.3)
 ```sh
+# Manual setup
 insmod udptun.ko
 ip link add udptun0 type udptun
 echo "192.0.2.2" > /sys/class/net/udptun0/peer
 ip addr add 10.0.0.3/24 dev udptun0
 ip link set udptun0 up
 
-ping 10.0.0.2  # After Machine A setup
+# Or use test script
+./scripts/test.sh 10.0.0.3 192.0.2.2
+```
+
+### Test
+```sh
+# From Machine A
+ping 10.0.0.3
+
+# From Machine B
+ping 10.0.0.2
 ```
 
 ## Configuration
