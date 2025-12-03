@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (C) 2025 uiop <uiop@wasdhjkl.xyz>. All Rights Reserved.
+ */
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
@@ -17,8 +22,6 @@
 #include <net/udp_tunnel.h>
 #include <net/sock.h>
 #include <net/route.h>
-
-MODULE_LICENSE("GPL v2");
 
 #define UDPTUN_PORT 12345
 
@@ -423,3 +426,8 @@ static void __exit udptun_exit(void)
 
 module_init(udptun_init);
 module_exit(udptun_exit);
+
+MODULE_LICENSE("GPL v2");
+MODULE_AUTHOR("uiop <uiop@wasdhjkl.xyz>");
+MODULE_DESCRIPTION("Rudimentary P2P UDP tunnel driver");
+MODULE_VERSION("0.0");
