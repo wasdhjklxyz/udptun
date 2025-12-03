@@ -31,6 +31,11 @@
 		       __LINE__, __func__, ##__VA_ARGS__);             \
 	} while (0)
 
+#define UDPTUN_LOG(fmt, ...)                                          \
+	do {                                                        \
+		printk(KERN_INFO "udptun: " fmt "\n", ##__VA_ARGS__); \
+	} while (0)
+
 struct udptun_priv {
 	struct mutex lock;
 	struct net __rcu *net;
@@ -66,19 +71,17 @@ static ssize_t peer_store(struct device *dev, struct device_attribute *attr,
 	/* Parse "IP:PORT" or just "IP" */
 	ret = sscanf(buf, "%63[^:]:%hu", ip_str, &port);
 	if (ret < 1) {
-		UDPTUN_DBG("Failed to parse peer IP:PORT");
+		UDPTUN_DBG("failed to parse peer IP:PORT");
 		return -EINVAL;
 	}
 
 	if (in4_pton(ip_str, -1, (u8 *)&addr, -1, NULL) == 0) {
-		UDPTUN_DBG("Failed to convert peer IP:PORT");
+		UDPTUN_DBG("failed to convert peer IP:PORT");
 		return -EINVAL;
 	}
 
 	priv->peer_addr = addr;
 	priv->peer_port = htons(port);
-
-	UDPTUN_DBG("%s peer set to %pI4:%u\n", ndev->name, &addr, port);
 
 	return len;
 }
@@ -99,7 +102,7 @@ static int udptun_rcv(struct sock *sk, struct sk_buff *skb)
 	struct udptun_priv *priv;
 	struct net_device *dev;
 	struct udphdr *udp;
-	struct iphdr *iph;
+	struct iphdr *inner_iph, *outer_iph;
 	size_t off;
 
 	priv = rcu_dereference_sk_user_data(sk);
@@ -111,7 +114,11 @@ static int udptun_rcv(struct sock *sk, struct sk_buff *skb)
 
 	dev = priv->dev;
 
+	outer_iph = ip_hdr(skb);
 	udp = udp_hdr(skb);
+	UDPTUN_LOG("[RX-ENC] %pI4:%u <- %pI4:%u (%u bytes)", &outer_iph->saddr,
+		 udp->source, &outer_iph->daddr, udp->dest, ntohs(udp->len));
+
 	off = (u8 *)udp + sizeof(struct udphdr) - skb->data;
 
 	__skb_pull(skb, off);
@@ -121,9 +128,9 @@ static int udptun_rcv(struct sock *sk, struct sk_buff *skb)
 	skb->protocol = htons(ETH_P_IP);
 	skb->pkt_type = PACKET_HOST;
 
-	iph = ip_hdr(skb);
-	UDPTUN_DBG("RX: proto=%u, src=%pI4, dst=%pI4, len=%u", skb->protocol,
-		 &iph->saddr, &iph->daddr, skb->len);
+	inner_iph = ip_hdr(skb);
+	UDPTUN_LOG("[RX-TUN] %pI4 ← %pI4 (%u bytes)", &inner_iph->saddr,
+		 &inner_iph->daddr, skb->len);
 
 	netif_rx(skb);
 
@@ -174,7 +181,7 @@ static int udptun_socket_init(struct udptun_priv *priv)
 	ret = udp_sock_create(net, &port, &sock);
 	rcu_read_unlock();
 	if (ret < 0) {
-		UDPTUN_DBG("Could not create socket");
+		UDPTUN_DBG("could not create socket");
 		goto out;
 	}
 
@@ -229,7 +236,8 @@ static int udptun_open(struct net_device *dev)
 	netif_carrier_on(dev);
 	netif_start_queue(dev);
 
-	UDPTUN_DBG("Device opened: %s", dev->name);
+	UDPTUN_LOG("device %s opened (peer: %pI4:%u)", dev->name,
+		 &priv->peer_addr, ntohs(priv->peer_port));
 
 	return 0;
 }
@@ -238,7 +246,7 @@ static int udptun_stop(struct net_device *dev)
 {
 	struct udptun_priv *priv = netdev_priv(dev);
 
-	UDPTUN_DBG("Device stopped: %s", dev->name);
+	UDPTUN_LOG("device %s stopped", dev->name);
 
 	netif_carrier_off(dev);
 	netif_stop_queue(dev);
@@ -260,12 +268,12 @@ static netdev_tx_t udptun_start_xmit(struct sk_buff *skb, struct net_device *dev
 	struct udptun_priv *priv = netdev_priv(dev);
 	struct flowi4 fl = { 0 };
 
-	UDPTUN_DBG("TX: proto=%u, src=%pI4, dst=%pI4, len=%u", iph->protocol,
-		 &iph->saddr, &iph->daddr, skb->len);
+	UDPTUN_LOG("[TX-TUN] %pI4 -> %pI4 (%u bytes)", &iph->saddr, &iph->daddr,
+		 skb->len);
 
 	peer_ip = priv->peer_addr;
 	if (!peer_ip) {
-		UDPTUN_DBG("No peer configured for %s", dev->name);
+		UDPTUN_DBG("no peer configured for %s", dev->name);
 		goto drop;
 	}
 
@@ -273,7 +281,7 @@ static netdev_tx_t udptun_start_xmit(struct sk_buff *skb, struct net_device *dev
 	sock = rcu_dereference_bh(priv->sock);
 	if (!sock) {
 		rcu_read_unlock_bh();
-		UDPTUN_DBG("Socket not initialized");
+		UDPTUN_DBG("socket not initialized");
 		goto drop;
 	}
 
@@ -282,7 +290,7 @@ static netdev_tx_t udptun_start_xmit(struct sk_buff *skb, struct net_device *dev
 
 	if (skb_cow_head(skb, needed_headroom)) {
 		rcu_read_unlock_bh();
-		UDPTUN_DBG("No headroom");
+		UDPTUN_DBG("no headroom");
 		goto drop;
 	}
 
@@ -293,11 +301,15 @@ static netdev_tx_t udptun_start_xmit(struct sk_buff *skb, struct net_device *dev
 	rt = ip_route_output_flow(sock_net(sock->sk), &fl, sock->sk);
 	if (IS_ERR(rt)) {
 		rcu_read_unlock_bh();
-		UDPTUN_DBG("Route lookup failed");
+		UDPTUN_DBG("route lookup failed");
 		goto drop;
 	}
 
 	tos = ip_tunnel_get_dsfield(iph, skb);
+
+	UDPTUN_LOG("[TX-ENC] %pI4:%u → %pI4:%u (%lu bytes)", &fl.saddr,
+		 inet_sk(sock->sk)->inet_sport, &fl.daddr, priv->peer_port,
+		 skb->len + sizeof(struct iphdr) + sizeof(struct udphdr));
 
 	skb->ignore_df = 1;
 	udp_tunnel_xmit_skb(rt, sock->sk, skb, fl.saddr, fl.daddr, tos,
@@ -364,18 +376,16 @@ static int udptun_newlink(struct net *src_net, struct net_device *dev,
 
 	ret = register_netdevice(dev);
 	if (ret < 0) {
-		UDPTUN_DBG("Failed to register device");
+		UDPTUN_DBG("failed to register device");
 		return ret;
 	}
 
 	ret = sysfs_create_group(&dev->dev.kobj, &udptun_attr_group);
 	if (ret < 0) {
-		UDPTUN_DBG("Failed to create sysfs group");
+		UDPTUN_DBG("failed to create sysfs group");
 		unregister_netdevice(dev);
 		return ret;
 	}
-
-	UDPTUN_DBG("Created %s", dev->name);
 
 	return 0;
 }
@@ -383,8 +393,6 @@ static int udptun_newlink(struct net *src_net, struct net_device *dev,
 static void udptun_dellink(struct net_device *dev, struct list_head *head)
 {
 	struct udptun_priv *priv = netdev_priv(dev);
-
-	UDPTUN_DBG("Deleting device: %s", dev->name);
 
 	sysfs_remove_group(&dev->dev.kobj, &udptun_attr_group);
 
@@ -413,15 +421,12 @@ static int __init udptun_init(void)
 		return ret;
 	}
 
-	UDPTUN_DBG("Module loaded");
-
 	return 0;
 }
 
 static void __exit udptun_exit(void)
 {
 	rtnl_link_unregister(&udptun_link_ops);
-	UDPTUN_DBG("Module unloaded");
 }
 
 module_init(udptun_init);
