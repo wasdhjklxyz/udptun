@@ -16,14 +16,17 @@
 #include <linux/compiler_types.h>
 #include <linux/rcupdate.h>
 #include <linux/inet.h>
+#include <linux/sysfs.h>
 #include <net/ip_tunnels.h>
 #include <net/rtnetlink.h>
 #include <net/ip.h>
 #include <net/udp_tunnel.h>
 #include <net/sock.h>
 #include <net/route.h>
+#include <crypto/curve25519.h>
 
 #define UDPTUN_PORT 12345
+#define UDPTUN_KEY_LEN CURVE25519_KEY_SIZE
 
 #define UDPTUN_DBG(fmt, ...)                                             \
 	do {                                                           \
@@ -43,7 +46,87 @@ struct udptun_priv {
 	struct net_device *dev;
 	__be32 peer_addr;
 	__be16 peer_port;
+	u8 publ[UDPTUN_KEY_LEN];
+	u8 priv[UDPTUN_KEY_LEN];
 };
+
+static ssize_t publ_read(struct file *filp, struct kobject *kobj,
+			 struct bin_attribute *attr, char *buf, loff_t off,
+			 size_t count)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct net_device *ndev = to_net_dev(dev);
+	struct udptun_priv *priv = netdev_priv(ndev);
+
+	if (off >= UDPTUN_KEY_LEN) {
+		UDPTUN_DBG("error: offset >= UDPTUN_KEY_LEN");
+		return 0;
+	}
+
+	if (off + count > UDPTUN_KEY_LEN) {
+		UDPTUN_DBG("warn: truncated public key");
+		count = UDPTUN_KEY_LEN - off;
+	}
+
+	memcpy(buf, priv->publ + off, count);
+	return count;
+}
+
+static ssize_t publ_write(struct file *filp, struct kobject *kobj,
+			  struct bin_attribute *attr, char *buf, loff_t off,
+			  size_t count)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct net_device *ndev = to_net_dev(dev);
+	struct udptun_priv *priv = netdev_priv(ndev);
+
+	if (off != 0 || count != UDPTUN_KEY_LEN) {
+		UDPTUN_DBG("error: invalid public key len");
+		return -EINVAL;
+	}
+
+	memcpy(priv->publ, buf, UDPTUN_KEY_LEN);
+	return count;
+}
+
+static ssize_t priv_read(struct file *filp, struct kobject *kobj,
+			 struct bin_attribute *attr, char *buf, loff_t off,
+			 size_t count)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct net_device *ndev = to_net_dev(dev);
+	struct udptun_priv *priv = netdev_priv(ndev);
+
+	if (off >= UDPTUN_KEY_LEN) {
+		UDPTUN_DBG("error: offset >= UDPTUN_KEY_LEN");
+		return 0;
+	}
+
+	if (off + count > UDPTUN_KEY_LEN) {
+		UDPTUN_DBG("warn: truncated privic key");
+		count = UDPTUN_KEY_LEN - off;
+	}
+
+	memcpy(buf, priv->priv + off, count);
+	return count;
+}
+
+static ssize_t priv_write(struct file *filp, struct kobject *kobj,
+			  struct bin_attribute *attr, char *buf, loff_t off,
+			  size_t count)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct net_device *ndev = to_net_dev(dev);
+	struct udptun_priv *priv = netdev_priv(ndev);
+
+	if (off != 0 || count != UDPTUN_KEY_LEN) {
+		UDPTUN_DBG("error: invalid privic key len");
+		return -EINVAL;
+	}
+
+	memcpy(priv->priv, buf, UDPTUN_KEY_LEN);
+	return count;
+}
 
 static ssize_t peer_show(struct device *d, struct device_attribute *attr,
 			 char *buf)
@@ -87,14 +170,23 @@ static ssize_t peer_store(struct device *dev, struct device_attribute *attr,
 }
 
 static DEVICE_ATTR_RW(peer);
+static BIN_ATTR_RW(publ, UDPTUN_KEY_LEN);
+static BIN_ATTR_RW(priv, UDPTUN_KEY_LEN);
 
 static struct attribute *udptun_attrs[] = {
 	&dev_attr_peer.attr,
 	NULL,
 };
 
+static struct bin_attribute *udptun_bin_attrs[] = {
+	&bin_attr_publ,
+	&bin_attr_priv,
+	NULL,
+};
+
 static const struct attribute_group udptun_attr_group = {
 	.attrs = udptun_attrs,
+	.bin_attrs = udptun_bin_attrs,
 };
 
 static int udptun_rcv(struct sock *sk, struct sk_buff *skb)
