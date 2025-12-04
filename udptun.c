@@ -143,7 +143,7 @@ static ssize_t priv_read(struct file *filp, struct kobject *kobj,
 	}
 
 	if (off + count > UDPTUN_KEY_LEN) {
-		UDPTUN_DBG("warn: truncated privic key");
+		UDPTUN_DBG("warn: truncated private key");
 		count = UDPTUN_KEY_LEN - off;
 	}
 
@@ -160,7 +160,7 @@ static ssize_t priv_write(struct file *filp, struct kobject *kobj,
 	struct udptun_priv *priv = netdev_priv(ndev);
 
 	if (off != 0 || count != UDPTUN_KEY_LEN) {
-		UDPTUN_DBG("error: invalid privic key len");
+		UDPTUN_DBG("error: invalid private key len");
 		return -EINVAL;
 	}
 
