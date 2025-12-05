@@ -24,6 +24,8 @@
 #include <net/sock.h>
 #include <net/route.h>
 #include <crypto/curve25519.h>
+#include <crypto/blake2s.h>
+#include <crypto/chacha20poly1305.h>
 
 #define UDPTUN_PORT 12345
 #define UDPTUN_KEY_LEN CURVE25519_KEY_SIZE
@@ -55,6 +57,18 @@ struct udptun_priv {
 	u8 publ[UDPTUN_KEY_LEN];
 	u8 priv[UDPTUN_KEY_LEN];
 };
+
+enum {
+	UDPTUN_MSG_INVALID,
+	UDPTUN_MSG_INIT,
+	UDPTUN_MSG_RESP,
+	UDPTUN_MSG_DATA,
+};
+
+struct udptun_msg_hs {
+	u8 type;
+	u8
+} __packed;
 
 static ssize_t peer_publ_read(struct file *filp, struct kobject *kobj,
 			      struct bin_attribute *attr, char *buf, loff_t off,
@@ -399,6 +413,19 @@ static int udptun_stop(struct net_device *dev)
 	return 0;
 }
 
+static void udptun_do_ecdh(struct udptun_priv *priv)
+{
+	struct udptun_peer *peer = &priv->peer;
+	struct blake2s_state b2s;
+	u8 sec[UDPTUN_KEY_LEN];
+
+	curve25519_arch(sec, priv->priv, peer->static_publ);
+
+	blake2s_init(&b2s, UDPTUN_KEY_LEN);
+	blake2s_update(&b2s, sec, UDPTUN_KEY_LEN);
+	blake2s_final(&b2s, peer->ephemeral_publ);
+}
+
 static netdev_tx_t udptun_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct socket *sock;
@@ -411,6 +438,8 @@ static netdev_tx_t udptun_start_xmit(struct sk_buff *skb, struct net_device *dev
 	struct udptun_priv *priv = netdev_priv(dev);
 	struct udptun_peer *peer = &priv->peer;
 	struct flowi4 fl = { 0 };
+
+	/* TODO: State of communication */
 
 	UDPTUN_LOG("[TX-TUN] %pI4 -> %pI4 (%u bytes)", &iph->saddr, &iph->daddr,
 		 skb->len);
